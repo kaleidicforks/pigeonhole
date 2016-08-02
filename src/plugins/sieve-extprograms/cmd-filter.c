@@ -203,6 +203,7 @@ static int cmd_filter_operation_execute
 
 		i_stream_set_name(newmsg,
 			t_strdup_printf("filter %s output", program_name));
+		newmsg->blocking = TRUE;
 		if ( (ret=sieve_message_substitute(renv->msgctx, newmsg)) >= 0 ) {
 			sieve_runtime_trace(renv,	SIEVE_TRLVL_ACTIONS,
 				"changed message");
@@ -230,9 +231,12 @@ static int cmd_filter_operation_execute
 			"filter action: program indicated false result");
 	}
 
-	if ( is_test )
+	if ( is_test ) {
 		sieve_interpreter_set_test_result(renv->interp, ( ret > 0 ));
 
-	return SIEVE_EXEC_OK;
+		return SIEVE_EXEC_OK;
+	}
+
+	return ( ret >= 0 ? SIEVE_EXEC_OK : SIEVE_EXEC_FAILURE );
 }
 

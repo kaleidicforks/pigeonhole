@@ -315,12 +315,10 @@ static int act_redirect_send
 	struct sieve_instance *svinst = aenv->svinst;
 	struct sieve_message_context *msgctx = aenv->msgctx;
 	const struct sieve_script_env *senv = aenv->scriptenv;
-	const char *sender;
-	const char *recipient = sieve_message_get_final_recipient(msgctx);
 	struct sieve_address_source env_from = svinst->redirect_from;
 	struct istream *input;
 	struct ostream *output;
-	const char *error;
+	const char *sender, *error;
 	struct sieve_smtp_context *sctx;
 	int ret;
 
@@ -365,7 +363,7 @@ static int act_redirect_send
 			if ( svinst->user_email == NULL )
 				sender = NULL;
 			else
-				sieve_address_to_string(svinst->user_email);
+				sender = sieve_address_to_string(svinst->user_email);
 		}
 	}
 
@@ -379,27 +377,36 @@ static int act_redirect_send
 
 	T_BEGIN {
 		string_t *hdr = t_str_new(256);
+		const char *user_email;
 
 		/* Prepend sieve headers (should not affect signatures) */
-		rfc2822_header_append(hdr, "X-Sieve", SIEVE_IMPLEMENTATION, FALSE, NULL);
-		if ( recipient != NULL ) {
-			rfc2822_header_append
-				(hdr, "X-Sieve-Redirected-From", recipient, FALSE, NULL);
+		rfc2822_header_append(hdr,
+			"X-Sieve", SIEVE_IMPLEMENTATION, FALSE, NULL);
+		if ( (aenv->flags & SIEVE_EXECUTE_FLAG_NO_ENVELOPE) == 0 )
+			user_email = sieve_message_get_final_recipient(msgctx);
+		else
+			user_email = sieve_get_user_email(aenv->svinst);
+		if ( user_email != NULL ) {
+			rfc2822_header_append(hdr,
+				"X-Sieve-Redirected-From", user_email, FALSE, NULL);
 		}
 
 		/* Add new Message-ID if message doesn't have one */
 		if ( new_msg_id != NULL )
 			rfc2822_header_write(hdr, "Message-ID", new_msg_id);
 
-		o_stream_send(output, str_data(hdr), str_len(hdr));
+		o_stream_nsend(output, str_data(hdr), str_len(hdr));
 	} T_END;
 
-	o_stream_send_istream(output, input);
+	o_stream_nsend_istream(output, input);
+
 	if (input->stream_errno != 0) {
 		sieve_result_critical(aenv,
 			"redirect action: failed to read input message",
-			"redirect action: failed to read message stream: %s",
+			"redirect action: read(%s) failed: %s",
+			i_stream_get_name(input),
 			i_stream_get_error(input));
+		i_stream_unref(&input);
 		return SIEVE_EXEC_TEMP_FAILURE;
 	}
   i_stream_unref(&input);
@@ -431,14 +438,15 @@ static int act_redirect_commit
 {
 	struct act_redirect_context *ctx =
 		(struct act_redirect_context *) action->context;
+	struct sieve_message_context *msgctx = aenv->msgctx;
 	struct mail *mail =	( action->mail != NULL ?
-		action->mail : sieve_message_get_mail(aenv->msgctx) );
+		action->mail : sieve_message_get_mail(msgctx) );
 	const struct sieve_message_data *msgdata = aenv->msgdata;
 	const struct sieve_script_env *senv = aenv->scriptenv;
-	const char *orig_recipient = sieve_message_get_orig_recipient(aenv->msgctx);
 	const char *msg_id = msgdata->id, *new_msg_id = NULL;
-	const char *dupeid = NULL, *resent_id = NULL;
+	const char *dupeid, *resent_id = NULL;
 	const char *list_id = NULL;
+	const char *recipient;
 	int ret;
 
 	/*
@@ -470,6 +478,11 @@ static int act_redirect_commit
 			sieve_message_get_new_id(aenv->svinst);
 	}
 
+	if ( (aenv->flags & SIEVE_EXECUTE_FLAG_NO_ENVELOPE) == 0 )
+		recipient = sieve_message_get_orig_recipient(msgctx);
+	else
+		recipient = sieve_get_user_email(aenv->svinst);
+
 	/* Base the duplicate ID on:
 	   - the message id
 	   - the recipient running this Sieve script
@@ -479,7 +492,7 @@ static int act_redirect_commit
 	   - if the message came through a mailing list: the mailinglist ID
 	 */
 	dupeid = t_strdup_printf("%s-%s-%s-%s-%s", msg_id,
-		orig_recipient, ctx->to_address,
+		(recipient != NULL ? recipient : ""), ctx->to_address,
 		(resent_id != NULL ? resent_id : ""),
 		(list_id != NULL ? list_id : ""));
 
@@ -501,10 +514,8 @@ static int act_redirect_commit
 		(aenv, mail, ctx, new_msg_id)) == SIEVE_EXEC_OK) {
 
 		/* Mark this message id as forwarded to the specified destination */
-		if (dupeid != NULL) {
-			sieve_action_duplicate_mark(senv, dupeid, strlen(dupeid),
-				ioloop_time + CMD_REDIRECT_DUPLICATE_KEEP);
-		}
+		sieve_action_duplicate_mark(senv, dupeid, strlen(dupeid),
+			ioloop_time + CMD_REDIRECT_DUPLICATE_KEEP);
 
 		sieve_result_global_log(aenv, "forwarded to <%s>",
 			str_sanitize(ctx->to_address, 128));

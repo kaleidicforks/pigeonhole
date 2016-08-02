@@ -556,14 +556,15 @@ static bool sieve_validator_extensions_check_conficts
 	struct sieve_ast_argument *ext_arg,
 	const struct sieve_extension *ext)
 {
-	struct sieve_validator_extension_reg *ext_reg = NULL;
+	struct sieve_validator_extension_reg *ext_reg;
 	struct sieve_validator_extension_reg *regs;
 	unsigned int count, i;
 
-	if ( ext->id >= 0 ) {
-		ext_reg = array_idx_modifiable
-			(&valdtr->extensions, (unsigned int) ext->id);
-	}
+	if ( ext->id < 0 )
+		return TRUE;
+
+	ext_reg = array_idx_modifiable
+		(&valdtr->extensions, (unsigned int) ext->id);
 
 	regs = array_get_modifiable(&valdtr->extensions, &count);
 	for ( i = 0; i < count; i++ ) {
@@ -577,7 +578,7 @@ static bool sieve_validator_extensions_check_conficts
 			continue;		
 
 		/* Check this extension vs other extension */
-		if ( ext_reg != NULL && ext_reg->valext != NULL &&
+		if ( ext_reg->valext != NULL &&
 			ext_reg->valext->check_conflict != NULL ) {
 			struct sieve_ast_argument *this_ext_arg =
 				(ext_arg == NULL ? regs[i].arg : ext_arg);
@@ -649,10 +650,10 @@ bool sieve_validator_extension_load
 		return FALSE;
 
 	/* Link extension to AST for use at code generation */
-	sieve_ast_extension_link(valdtr->ast, ext, reg->required);
-
-	if ( reg != NULL )
+	if ( reg != NULL ) {
+		sieve_ast_extension_link(valdtr->ast, ext, reg->required);
 		reg->loaded = TRUE;
+	}
 
 	return TRUE;
 }
@@ -914,6 +915,8 @@ bool sieve_validate_tag_parameter
 	const char *arg_name, unsigned int arg_pos,
 	enum sieve_ast_argument_type req_type, bool constant)
 {
+	i_assert(tag != NULL);
+
 	if ( param == NULL ) {
 		const char *position = ( arg_pos == 0 ? "" :
 			t_strdup_printf(" %d (%s)", arg_pos, arg_name) );

@@ -142,8 +142,8 @@ static int proxy_input_auth_challenge
 	(void)i_stream_read(input);
 	ret = managesieve_parser_read_args(parser, 1, 0, &args);
 
-	if ( ret >= 1 ) {
-		if ( managesieve_arg_get_string(&args[0], &challenge) ) {
+	if ( ret >= 0 ) {
+		if ( ret > 0 && managesieve_arg_get_string(&args[0], &challenge) ) {
 			*challenge_r = t_strdup(challenge);
 		} else {
 			client_log_err(&client->common, t_strdup_printf("proxy: "
@@ -156,7 +156,7 @@ static int proxy_input_auth_challenge
 		/* Parser needs more data (not possible on mem stream) */
 		i_unreached();
 
-	} else if ( ret < 0 ) {
+	} else {
 		const char *error_str = managesieve_parser_get_error(parser, &fatal);
 		error_str = (error_str != NULL ? error_str : "unknown (bug)" );
 
@@ -264,7 +264,12 @@ static int proxy_input_capability
 	(void)i_stream_read(input);
 	ret = managesieve_parser_read_args(parser, 2, 0, &args);
 
-	if ( ret >= 1 ) {
+	if ( ret == 0 ) {
+		client_log_err(&client->common, t_strdup_printf("proxy: "
+			"Remote returned with invalid capability/greeting line: %s",
+			str_sanitize(line,160)));
+		fatal = TRUE;
+	} else if ( ret > 0 ) {
 		if ( args[0].type == MANAGESIEVE_ARG_ATOM ) {
 			*resp_r = proxy_read_response(args);
 
@@ -314,7 +319,7 @@ static int proxy_input_capability
 		/* Parser needs more data (not possible on mem stream) */
 		i_unreached();
 
-	} else if ( ret < 0 ) {
+	} else {
 		const char *error_str = managesieve_parser_get_error(parser, &fatal);
 		error_str = (error_str != NULL ? error_str : "unknown (bug)" );
 
@@ -392,7 +397,7 @@ int managesieve_proxy_parse_line(struct client *client, const char *line)
 				msieve_client->proxy_state = MSIEVE_PROXY_STATE_AUTH;
 			}
 
-			(void)o_stream_send(output, str_data(command), str_len(command));
+			o_stream_nsend(output, str_data(command), str_len(command));
 		}
 		return 0;
 
@@ -444,7 +449,7 @@ int managesieve_proxy_parse_line(struct client *client, const char *line)
 				}
 				msieve_client->proxy_state = MSIEVE_PROXY_STATE_AUTH;
 			}
-			(void)o_stream_send(output, str_data(command), str_len(command));
+			o_stream_nsend(output, str_data(command), str_len(command));
 		}
 		return 0;
 
@@ -457,7 +462,7 @@ int managesieve_proxy_parse_line(struct client *client, const char *line)
 				client_proxy_failed(client, TRUE);
 				return -1;
 			}
-			(void)o_stream_send(output, str_data(command), str_len(command));
+			o_stream_nsend(output, str_data(command), str_len(command));
 			msieve_client->proxy_state = MSIEVE_PROXY_STATE_AUTH;
 			return 0;
 		}
@@ -484,7 +489,7 @@ int managesieve_proxy_parse_line(struct client *client, const char *line)
 				client_proxy_failed(client, TRUE);
 				return -1;
 			}
-			(void)o_stream_send(output, str_data(command), str_len(command));
+			o_stream_nsend(output, str_data(command), str_len(command));
 			return 0;
 		}
 
@@ -500,7 +505,7 @@ int managesieve_proxy_parse_line(struct client *client, const char *line)
 			/* Send this line to client. */
 			str_append(str, line );
 			str_append(str, "\r\n");
-			(void)o_stream_send(client->output, str_data(str), str_len(str));
+			o_stream_nsend(client->output, str_data(str), str_len(str));
 
 			(void)client_skip_line(msieve_client);
 			client_proxy_finish_destroy_client(client);

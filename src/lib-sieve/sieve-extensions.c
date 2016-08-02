@@ -382,15 +382,6 @@ static struct sieve_extension *sieve_extension_lookup
 	return 	hash_table_lookup(ext_reg->extension_index, name);
 }
 
-static void sieve_extension_insert
-(struct sieve_instance *svinst, const char *name,
-	struct sieve_extension *ext)
-{
-	struct sieve_extension_registry *ext_reg = svinst->ext_reg;
-
-	hash_table_insert(ext_reg->extension_index, name, ext);
-} 
-
 static struct sieve_extension *sieve_extension_alloc
 (struct sieve_instance *svinst,
 	const struct sieve_extension_def *extdef)
@@ -421,7 +412,8 @@ static struct sieve_extension *_sieve_extension_register
 	/* Register extension if it is not registered already */
 	if ( ext == NULL ) {
 		ext = sieve_extension_alloc(svinst, extdef);
-		sieve_extension_insert(svinst, extdef->name, ext);
+		hash_table_insert
+			(svinst->ext_reg->extension_index, extdef->name, ext);
 
 	} else if ( ext->overridden ) {
 		/* Create a dummy */
@@ -504,15 +496,19 @@ void sieve_extension_override
 	struct sieve_extension * const *mod_ext;
 	struct sieve_extension *old_ext;
 
+	old_ext = sieve_extension_lookup(svinst, name);
+	if (old_ext == ext)
+		return;
+	i_assert( old_ext == NULL || !old_ext->overridden );
+
 	i_assert( ext->id >= 0 &&
 		ext->id < (int) array_count(&ext_reg->extensions) );
 	mod_ext = array_idx(&ext_reg->extensions, ext->id);
 
-	old_ext = sieve_extension_lookup(svinst, name);
-	i_assert( old_ext == NULL || !old_ext->overridden );
-
-	sieve_extension_insert(svinst, name, *mod_ext);
-	(*mod_ext)->overridden = TRUE;
+	hash_table_update
+		(ext_reg->extension_index, name, *mod_ext);
+	if ( old_ext != NULL )
+		old_ext->overridden = TRUE;
 }
 
 unsigned int sieve_extensions_get_count(struct sieve_instance *svinst)
@@ -569,7 +565,7 @@ const struct sieve_extension *sieve_extension_get_by_name
 static inline bool _sieve_extension_listable(const struct sieve_extension *ext)
 {
 	return ( ext->enabled && ext->def != NULL && *(ext->def->name) != '@'
-		&& !ext->dummy && !ext->global );
+		&& !ext->dummy && !ext->global && !ext->overridden);
 }
 
 const char *sieve_extensions_get_string(struct sieve_instance *svinst)
@@ -824,9 +820,15 @@ void sieve_extension_capabilities_register
 {
 	struct sieve_instance *svinst = ext->svinst;
 	struct sieve_extension_registry *ext_reg = svinst->ext_reg;
-	struct sieve_capability_registration *reg =
-		p_new(svinst->pool, struct sieve_capability_registration, 1);
+	struct sieve_capability_registration *reg;
 
+	reg = hash_table_lookup(ext_reg->capabilities_index, cap->name);
+	if (reg != NULL) {
+		/* Already registered */
+		return;
+	}
+
+	reg = p_new(svinst->pool, struct sieve_capability_registration, 1);
 	reg->ext = ext;
 	reg->capabilities = cap;
 

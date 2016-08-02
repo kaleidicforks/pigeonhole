@@ -419,6 +419,8 @@ int sieve_message_substitute
 	const char *sender;
 	int ret;
 
+	i_assert(input->blocking);
+
 	if ( msgctx->raw_mail_user == NULL ) {
 		void **sets = master_service_settings_get_others(master_service);
 
@@ -1484,7 +1486,8 @@ static int sieve_message_parts_add_missing
 	if ( input->stream_errno != 0 ) {
 		sieve_runtime_critical(renv, NULL,
 			"failed to read input message",
-			"failed to read message stream: %s",
+			"read(%s) failed: %s",
+			i_stream_get_name(input),
 			i_stream_get_error(input));
 		return SIEVE_EXEC_TEMP_FAILURE;
 	}
@@ -1579,16 +1582,17 @@ int sieve_message_body_get_raw
 		i_stream_skip(input, hdr_size.physical_size);
 
 		/* Read raw message body */
-		while ( (ret=i_stream_read_data(input, &data, &size, 0)) > 0 ) {
+		while ( (ret=i_stream_read_more(input, &data, &size)) > 0 ) {
 			buffer_append(buf, data, size);
 
 			i_stream_skip(input, size);
 		}
 
-		if ( ret == -1 && input->stream_errno != 0 ) {
+		if ( ret < 0 && input->stream_errno != 0 ) {
 			sieve_runtime_critical(renv, NULL,
 				"failed to read input message",
-				"failed to read raw message stream: %s",
+				"read(%s) failed: %s",
+				i_stream_get_name(input),
 				i_stream_get_error(input));
 			return SIEVE_EXEC_TEMP_FAILURE;
 		}

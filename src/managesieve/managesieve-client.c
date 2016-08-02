@@ -141,8 +141,8 @@ struct client *client_create
 	client->fd_in = fd_in;
 	client->fd_out = fd_out;
 	client->input = i_stream_create_fd
-		(fd_in, set->managesieve_max_line_length, FALSE);
-	client->output = o_stream_create_fd(fd_out, (size_t)-1, FALSE);
+		(fd_in, set->managesieve_max_line_length);
+	client->output = o_stream_create_fd(fd_out, (size_t)-1);
 
 	o_stream_set_no_error_handling(client->output, TRUE);
 	i_stream_set_name(client->input, "<managesieve client>");
@@ -200,7 +200,7 @@ static const char *client_stats(struct client *client)
 	struct var_expand_table *tab;
 	string_t *str;
 
-	tab = t_malloc(sizeof(static_tab));
+	tab = t_malloc_no0(sizeof(static_tab));
 	memcpy(tab, static_tab, sizeof(static_tab));
 
 	tab[0].value = dec2str(client->put_bytes);
@@ -256,7 +256,6 @@ void client_destroy(struct client *client, const char *reason)
 			mail_user_get_anvil_userip_ident(client->user),
 			"\n", NULL));
 	}
-	mail_user_unref(&client->user);
 
 	managesieve_parser_destroy(&client->parser);
 	if (client->io != NULL)
@@ -265,12 +264,19 @@ void client_destroy(struct client *client, const char *reason)
 		timeout_remove(&client->to_idle_output);
 	timeout_remove(&client->to_idle);
 
-	i_stream_destroy(&client->input);
-	o_stream_destroy(&client->output);
-
+	/* i/ostreams are already closed at this stage, so fd can be closed */
 	net_disconnect(client->fd_in);
 	if (client->fd_in != client->fd_out)
 		net_disconnect(client->fd_out);
+
+	/* Free the user after client is already disconnected. It may start
+	   some background work like autoexpunging. */
+	mail_user_unref(&client->user);
+
+	/* free the i/ostreams after mail_user_unref(), which could trigger
+		 mail_storage_callbacks notifications that write to the ostream. */
+	i_stream_destroy(&client->input);
+	o_stream_destroy(&client->output);
 
 	sieve_storage_unref(&client->storage);
 	sieve_deinit(&client->svinst);

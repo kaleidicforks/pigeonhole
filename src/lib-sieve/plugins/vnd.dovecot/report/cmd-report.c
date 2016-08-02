@@ -261,7 +261,6 @@ static bool cmd_report_operation_dump
 	/* Dump optional operands */
 	for (;;) {
 		int opt;
-		bool opok = TRUE;
 
 		if ( (opt=sieve_opr_optional_dump
 			(denv, address, &opt_code)) < 0 )
@@ -276,8 +275,6 @@ static bool cmd_report_operation_dump
 		default:
 			return FALSE;
 		}
-
-		if ( !opok ) return FALSE;
 	}
 
 	return
@@ -318,14 +315,11 @@ static int cmd_report_operation_execute
 		switch ( opt_code ) {
 		case OPT_HEADERS_ONLY:
 			headers_only = TRUE;
-			ret = SIEVE_EXEC_OK;
 			break;
 		default:
 			sieve_runtime_trace_error(renv, "unknown optional operand");
 			return SIEVE_EXEC_BIN_CORRUPT;
 		}
-
-		if ( ret <= 0 ) return ret;
 	}
 
 	/* Fixed operands */
@@ -532,7 +526,7 @@ static int act_report_send
 	rfc2822_header_write(msg, "Content-Disposition", "inline");
 
 	str_printfa(msg, "\r\n%s\r\n\r\n", act->message);
-	o_stream_send(output, str_data(msg), str_len(msg));
+	o_stream_nsend(output, str_data(msg), str_len(msg));
 
 	/* Machine-readable report */
   str_truncate(msg, 0);
@@ -568,7 +562,7 @@ static int act_report_send
 	}
 	str_append(msg, "\r\n");
 
-	o_stream_send(output, str_data(msg), str_len(msg));
+	o_stream_nsend(output, str_data(msg), str_len(msg));
 
 	/* Original message */
   str_truncate(msg, 0);
@@ -583,7 +577,7 @@ static int act_report_send
 	rfc2822_header_write(msg,
 		"Content-Disposition", "attachment");
 	str_append(msg, "\r\n");
-	o_stream_send(output, str_data(msg), str_len(msg));
+	o_stream_nsend(output, str_data(msg), str_len(msg));
 
 	if (act->headers_only) {
 		struct message_size hdr_size;
@@ -599,15 +593,26 @@ static int act_report_send
 		return sieve_result_mail_error(aenv, msgdata->mail,
 			"report action: failed to read input message");
 	}
-  ret = o_stream_send_istream(output, input);
-  i_assert(ret != 0);
+
+	o_stream_nsend_istream(output, input);
+
+	if ( input->stream_errno != 0 ) {
+		/* Error; clean up */
+		sieve_result_critical(aenv,
+			"report action: failed to read input message",
+			"report action: read(%s) failed: %s",
+			i_stream_get_name(input),
+			i_stream_get_error(input));
+		i_stream_unref(&input);
+		return SIEVE_EXEC_OK;
+	}
 	i_stream_unref(&input);
 
   str_truncate(msg, 0);
 	if (!act->headers_only)
 		str_printfa(msg, "\r\n");
 	str_printfa(msg, "\r\n--%s--\r\n", boundary);
-  o_stream_send(output, str_data(msg), str_len(msg));
+  o_stream_nsend(output, str_data(msg), str_len(msg));
 
 	/* Finish sending message */
 	if ( (ret=sieve_smtp_finish(sctx, &error)) <= 0 ) {

@@ -535,13 +535,13 @@ static int _envelope_part_is_supported
 					*not_address = epart;
 			}
 
-			return TRUE;
+			return 1;
 		}
 
-		return FALSE;
+		return 0;
 	}
 
-	return TRUE; /* Can't check at compile time */
+	return 1; /* Can't check at compile time */
 }
 
 static bool tst_envelope_validate
@@ -567,9 +567,9 @@ static bool tst_envelope_validate
 	 *   FIXME: verify dynamic envelope parts at runtime
 	 */
 	epart = arg;
-	if ( !sieve_ast_stringlist_map(&epart, (void *) &not_address,
-		_envelope_part_is_supported) ) {
-
+	if ( sieve_ast_stringlist_map(&epart, (void *) &not_address,
+		_envelope_part_is_supported) <= 0 ) {
+		i_assert(epart != NULL);
 		sieve_argument_validate_error(valdtr, epart,
 			"specified envelope part '%s' is not supported by the envelope test",
 				str_sanitize(sieve_ast_strlist_strc(epart), 64));

@@ -797,8 +797,11 @@ int sieve_ldap_db_connect(struct ldap_connection *conn)
 	const struct sieve_ldap_storage_settings *set = &conn->lstorage->set;
 	struct sieve_storage *storage = &conn->lstorage->storage;
 	struct timeval start, end;
-	int debug_level, ret;
+	int debug_level;
 	bool debug;
+#if defined(HAVE_LDAP_SASL) || defined(LDAP_HAVE_START_TLS_S)
+	int ret;
+#endif
 
 	if (conn->conn_state != LDAP_CONN_STATE_DISCONNECTED)
 		return 0;
@@ -1203,7 +1206,7 @@ db_ldap_get_var_expand_table(struct ldap_connection *conn,
 
 	/* keep the extra fields at the beginning. the last static_tab field
 	   contains the ending NULL-fields. */
-	tab = t_malloc((auth_count) * sizeof(*tab));
+	tab = t_malloc_no0((auth_count) * sizeof(*tab));
 
 	memcpy(tab, auth_request_var_expand_static_tab,
 	       auth_count * sizeof(*tab));

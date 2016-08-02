@@ -15,6 +15,7 @@
 #include "sieve-extensions.h"
 #include "sieve-plugins.h"
 
+#include "sieve-address.h"
 #include "sieve-script.h"
 #include "sieve-storage-private.h"
 #include "sieve-ast.h"
@@ -855,7 +856,7 @@ int sieve_trace_log_create
 	*trace_log_r = NULL;
 
 	if ( path == NULL ) {
-		output = o_stream_create_fd(1, 0, FALSE);
+		output = o_stream_create_fd(1, 0);
 	} else {
 		fd = open(path, O_CREAT | O_APPEND | O_WRONLY, 0600);
 		if ( fd == -1 ) {
@@ -864,6 +865,7 @@ int sieve_trace_log_create
 			return -1;
 		}
 		output = o_stream_create_fd_autoclose(&fd, 0);
+		o_stream_set_name(output, path);
 	}
 
 	trace_log = i_new(struct sieve_trace_log, 1);
@@ -934,7 +936,7 @@ void sieve_trace_log_write_line
 	struct const_iovec iov[2];
 
 	if (line == NULL) {
-		o_stream_send_str(trace_log->output, "\n");
+		o_stream_nsend_str(trace_log->output, "\n");
 		return;
 	}
 
@@ -943,7 +945,7 @@ void sieve_trace_log_write_line
 	iov[0].iov_len = str_len(line);
 	iov[1].iov_base = "\n";
 	iov[1].iov_len = 1;
-	o_stream_sendv(trace_log->output, iov, 2);
+	o_stream_nsendv(trace_log->output, iov, 2);
 }
 
 void sieve_trace_log_free(struct sieve_trace_log **_trace_log)
@@ -952,6 +954,11 @@ void sieve_trace_log_free(struct sieve_trace_log **_trace_log)
 
 	*_trace_log = NULL;
 
+	if (o_stream_nfinish(trace_log->output) < 0) {
+		i_error("write(%s) failed: %s",
+			o_stream_get_name(trace_log->output),
+			o_stream_get_error(trace_log->output));
+	}
 	o_stream_destroy(&trace_log->output);
 	i_free(trace_log);
 }
@@ -995,4 +1002,29 @@ int sieve_trace_config_get(struct sieve_instance *svinst,
 	if (tr_addresses)
 		tr_config->flags |= SIEVE_TRFLG_ADDRESSES;
 	return 0;
+}
+
+/*
+ * User e-mail address
+ */
+
+const char *sieve_get_user_email
+(struct sieve_instance *svinst)
+{
+	const char *username = svinst->username;
+
+	if (svinst->user_email != NULL)
+		return sieve_address_to_string(svinst->user_email);
+
+	if ( strchr(username, '@') != 0 )
+		return username;
+	if ( svinst->domainname != NULL ) {
+		struct sieve_address svaddr;
+
+		memset(&svaddr, 0, sizeof(svaddr));
+		svaddr.local_part = username;
+		svaddr.domain = svinst->domainname;
+		return sieve_address_to_string(&svaddr);
+	}
+	return NULL;
 }

@@ -86,8 +86,6 @@ static ssize_t program_client_istream_read(struct istream_private *stream)
 			}
 		}
 	
-		if ( ret == 0 || (ret < 0 && !stream->parent->eof) ) break;
-
 		if ( stream->buffer != NULL && pos >= 1 ) {
 			/* retain/hide potential return code at end of buffer */
 			reserved = ( stream->buffer[pos-1] == '\n' && pos > 1 ? 2 : 1 );
@@ -98,6 +96,8 @@ static ssize_t program_client_istream_read(struct istream_private *stream)
 				ret = ( (size_t)ret > reserved ? ret - reserved : 0 );
 			}
 		}
+
+		if ( ret == 0 || (ret < 0 && !stream->parent->eof) ) break;
 
 		if ( ret <= 0 && stream->parent->eof ) {
 			/* Parent EOF and not more data to return; EOF here as well */
@@ -205,6 +205,9 @@ static void program_client_remote_connected(struct program_client *pclient)
 
 	if ( o_stream_send
 		(pclient->program_output, str_data(str), str_len(str)) < 0 ) {
+		i_error("write(%s) failed: %s",
+			o_stream_get_name(pclient->program_output),
+			o_stream_get_error(pclient->program_output));
 		program_client_fail(pclient, PROGRAM_CLIENT_ERROR_IO);
 		return;
 	}
@@ -218,12 +221,8 @@ static int program_client_remote_connect(struct program_client *pclient)
 		(struct program_client_remote *)pclient;
 	int fd;
 
-	if ((fd = net_connect_unix(pclient->path)) < 0) {
+	if ((fd = net_connect_unix_with_retries(pclient->path, 1000)) < 0) {
 		switch (errno) {
-		case EAGAIN:
-		case ECONNREFUSED:
-			// FIXME: retry;
-			return -1;
 		case EACCES:
 			i_error("%s", eacces_error_get("net_connect_unix", pclient->path));
 			return -1;
@@ -277,8 +276,8 @@ static int program_client_remote_disconnect
 		size_t size;
 
 		/* Skip any remaining program output and parse the exit code */
-		while ((ret = i_stream_read_data
-			(pclient->program_input, &data, &size, 0)) > 0) {	
+		while ((ret = i_stream_read_more
+			(pclient->program_input, &data, &size)) > 0) {
 			i_stream_skip(pclient->program_input, size);
 		}
 
@@ -294,23 +293,6 @@ static int program_client_remote_disconnect
 	return ret;
 }
 
-static void program_client_remote_failure
-(struct program_client *pclient, enum program_client_error error)
-{
-	switch ( error ) {
-	case PROGRAM_CLIENT_ERROR_CONNECT_TIMEOUT:
-		i_error("program `%s' socket connection timed out (> %d msecs)",
-			pclient->path, pclient->set.client_connect_timeout_msecs);
-		break;
-	case PROGRAM_CLIENT_ERROR_RUN_TIMEOUT:
-		i_error("program `%s' execution timed out (> %d secs)",
-			pclient->path, pclient->set.input_idle_timeout_secs);
-		break;
-	default:
-		break;
-	}
-}
-
 struct program_client *program_client_remote_create
 (const char *socket_path, const char *const *args, 
 	const struct program_client_settings *set, bool noreply)
@@ -324,7 +306,6 @@ struct program_client *program_client_remote_create
 	pclient->client.connect = program_client_remote_connect;
 	pclient->client.close_output = program_client_remote_close_output;
 	pclient->client.disconnect = program_client_remote_disconnect;
-	pclient->client.failure = program_client_remote_failure;
 	pclient->noreply = noreply;
 
 	return &pclient->client;

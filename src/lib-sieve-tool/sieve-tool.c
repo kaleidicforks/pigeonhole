@@ -136,7 +136,8 @@ struct sieve_tool *sieve_tool_init
 {
 	struct sieve_tool *tool;
 	enum master_service_flags service_flags =
-		MASTER_SERVICE_FLAG_STANDALONE;
+		MASTER_SERVICE_FLAG_STANDALONE |
+		MASTER_SERVICE_FLAG_NO_INIT_DATASTACK_FRAME;
 
 	if ( no_config )
 		service_flags |= MASTER_SERVICE_FLAG_NO_CONFIG_SETTINGS;
@@ -508,7 +509,7 @@ struct ostream *sieve_tool_open_output_stream(const char *filename)
 	int fd;
 
 	if ( strcmp(filename, "-") == 0 )
-		outstream = o_stream_create_fd(1, 0, FALSE);
+		outstream = o_stream_create_fd(1, 0);
 	else {
 		if ( (fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0600)) < 0 ) {
 			i_fatal("failed to open file for writing: %m");
@@ -577,6 +578,10 @@ void sieve_tool_dump_binary_to
 			(void) sieve_hexdump(sbin, dumpstream);
 		else
 			(void) sieve_dump(sbin, dumpstream, FALSE);
+		if (o_stream_nfinish(dumpstream) < 0) {
+			i_fatal("write(%s) failed: %s", filename,
+				o_stream_get_error(dumpstream));
+		}
 		o_stream_destroy(&dumpstream);
 	} else {
 		i_fatal("Failed to create stream for sieve code dump.");

@@ -721,7 +721,7 @@ static inline char *_header_decode
 
 	/* Decode MIME encoded-words. */
 	message_header_decode_utf8
-		((const unsigned char *)hdr_data, hdr_data_len, str, FALSE);
+		((const unsigned char *)hdr_data, hdr_data_len, str, NULL);
 	return i_strdup(str_c(str));
 }
 
@@ -826,11 +826,14 @@ static int edit_mail_headers_parse
 
 	message_parse_header_deinit(&hparser);
 
-	if ( ret <= 0 ) {
-		/* blocking i/o required */
-		i_assert( ret != 0 );
+	/* blocking i/o required */
+	i_assert( ret != 0 );
 
+	if ( ret < 0 && edmail->wrapped_stream->stream_errno != 0 ) {
 		/* Error; clean up */
+		i_error("read(%s) failed: %s",
+			i_stream_get_name(edmail->wrapped_stream),
+			i_stream_get_error(edmail->wrapped_stream));
 		current = head;
 		while ( current != NULL ) {
 			struct _header_field_index *next = current->next;
@@ -2070,7 +2073,7 @@ static void edit_mail_istream_seek
 			i_assert( cur_header != NULL );
 			offset += cur_header->field->size;
 
-			while ( cur_header != NULL && v_offset > offset ) {
+			while ( v_offset > offset ) {
 				cur_header = edstream->cur_header->next;
 				i_assert( cur_header != NULL );
 

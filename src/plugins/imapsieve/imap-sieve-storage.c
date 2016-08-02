@@ -595,13 +595,6 @@ imap_sieve_mailbox_transaction_run(
 			(user, isuser->client->lda_set);
 	}
 
-	/* Get synchronized view on the mailbox */
-	sbox = mailbox_alloc(box->list, box->vname, 0);
-	if (mailbox_sync(sbox, 0) < 0) {
-		mailbox_free(&sbox);
-		return -1;
-	}
-
 	can_discard = FALSE;
 	switch (isuser->cur_cmd) {
 	case IMAP_SIEVE_CMD_APPEND:
@@ -655,8 +648,14 @@ imap_sieve_mailbox_transaction_run(
 
 	if (ret <= 0) {
 		// FIXME: temp fail should be handled properly
-		mailbox_free(&sbox);
 		return 0;
+	}
+
+	/* Get synchronized view on the mailbox */
+	sbox = mailbox_alloc(box->list, box->vname, 0);
+	if (mailbox_sync(sbox, 0) < 0) {
+		mailbox_free(&sbox);
+		return -1;
 	}
 
 	/* Create transaction for event messages */
@@ -723,7 +722,7 @@ imap_sieve_mailbox_transaction_commit(
 
 	if ((lbox->super.transaction_commit(t, changes_r)) < 0)
 		ret = -1;
-	else {
+	else if (ismt != NULL) {
 		isuser->sieve_active = TRUE;
 		if (imap_sieve_mailbox_transaction_run
 			(ismt, box, changes_r) < 0)
@@ -814,10 +813,18 @@ static void
 imap_sieve_mailbox_rules_init(struct mail_user *user)
 {
 	struct imap_sieve_user *isuser = IMAP_SIEVE_USER_CONTEXT(user);
-	string_t *identifier = t_str_new(256);
+	string_t *identifier;
 	unsigned int i = 0;
 	size_t prefix_len;
 
+	if (hash_table_is_created(isuser->mbox_rules))
+		return;
+
+	hash_table_create(&isuser->mbox_rules, default_pool, 0,
+		imap_sieve_mailbox_rule_hash, imap_sieve_mailbox_rule_cmp);
+	i_array_init(&isuser->mbox_patterns, 8);
+
+	identifier = t_str_new(256);
 	str_append(identifier, "imapsieve_mailbox");
 	prefix_len = str_len(identifier);
 
@@ -1026,6 +1033,8 @@ imap_sieve_mailbox_rules_get(struct mail_user *user,
 {
 	const char *dst_name, *src_name;
 
+	imap_sieve_mailbox_rules_init(user);
+
 	imap_sieve_mailbox_rules_match_patterns
 		(user, dst_box, src_box, cause, rules);
 
@@ -1056,8 +1065,10 @@ static void imap_sieve_user_deinit(struct mail_user *user)
 	if (isuser->isieve != NULL)
 		imap_sieve_deinit(&isuser->isieve);
 
-	hash_table_destroy(&isuser->mbox_rules);
-	array_free(&isuser->mbox_patterns);
+	if (hash_table_is_created(isuser->mbox_rules))
+		hash_table_destroy(&isuser->mbox_rules);
+	if (array_is_created(&isuser->mbox_patterns))
+		array_free(&isuser->mbox_patterns);
 
 	isuser->module_ctx.super.deinit(user);
 }
@@ -1072,12 +1083,6 @@ static void imap_sieve_user_created(struct mail_user *user)
 	user->vlast = &isuser->module_ctx.super;
 	v->deinit = imap_sieve_user_deinit;
 	MODULE_CONTEXT_SET(user, imap_sieve_user_module, isuser);
-
-	hash_table_create(&isuser->mbox_rules, default_pool, 0,
-		imap_sieve_mailbox_rule_hash, imap_sieve_mailbox_rule_cmp);
-	i_array_init(&isuser->mbox_patterns, 8);
-
-	imap_sieve_mailbox_rules_init(user);
 }
 
 /*

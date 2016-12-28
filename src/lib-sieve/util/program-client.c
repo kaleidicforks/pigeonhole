@@ -193,7 +193,11 @@ static int program_client_program_output(struct program_client *pclient)
 				}
 	
 				if ( sent == 0 )
+				{
+					o_stream_destroy(output);
 					return 0;
+				}
+					
 				i_stream_skip(input, sent);
 			}
 		} while ( (ret=i_stream_read(input)) > 0 );

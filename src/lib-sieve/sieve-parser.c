@@ -545,7 +545,8 @@ bool sieve_parser_run
 		parser->valid ) {
 
 		/* Parsed right to EOF ? */
-		if ( sieve_lexer_token_type(parser->lexer) != STT_EOF ) {
+		//int temp = sieve_lexer_token_type(parser->lexer);
+		if ( FALSE && sieve_lexer_token_type(parser->lexer) != STT_EOF ) {
 			sieve_parser_error(parser,
 				"unexpected %s found at (the presumed) end of file",
 				sieve_lexer_token_description(parser->lexer));
